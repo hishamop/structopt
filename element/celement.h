@@ -51,7 +51,7 @@ public:
     virtual void set_constrained_faces()=0;
     virtual void set_boundary_constraints(const double*, double*)=0;
     virtual void set_constraints_boundvals()=0;
-    virtual void set_NLP_constraint_matrix(BoundaryFace&)=0;
+    virtual void set_NLP_constraint_matrix()=0;
 
     virtual std::vector<node_ptr>  get_face(unsigned int)                const =0;    // return node_ptrs of nth face of element.
     virtual Element::element_type           get_element_type()                    const =0;

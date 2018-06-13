@@ -291,9 +291,12 @@ void CPS4::calculate_fvals(std::vector<double>& gval)
     const std::vector<double>& qn = m_val.get_qnodes();
     const std::vector<double>& qw = m_val.get_qweight();
 
-    m_objval =0.0;
-    Eigen::RowVectorXd sdf_grad(24,0);
-    Eigen::RowVectorXd disp_grad(8,0);
+    double objval =0.0;
+  //  Eigen::RowVectorXd sdf_grad(24);
+    Eigen::RowVectorXd disp_grad = Eigen::VectorXd::Zero(8);
+    Eigen::VectorXd sdf_grad= Eigen::VectorXd::Zero(24);
+    Eigen::VectorXd stress_dof = get_stress_dof();
+    Eigen::VectorXd strain_dof = get_strain_dof();
 
 
     for(unsigned int i=0;i!=qn.size(); i++)
@@ -302,48 +305,58 @@ void CPS4::calculate_fvals(std::vector<double>& gval)
         {
             double sval = qn[i];
             double tval = qn[j];
-            m_shape->add_coordinates(this->get_xcoords(),this->get_ycoords());
+            if(!m_shape->m_set_coordinate)
+                 m_shape->add_coordinates(this->get_xcoords(),this->get_ycoords());
             m_shape->update_shapefn(sval,tval);
+            Eigen::MatrixXd Bs = get_bsmat_local(i,j);
+            Eigen::Vector3d stress = Bs*stress_dof;
+            Eigen::MatrixXd Bd = get_bmat(sval,tval);
+            Eigen::Vector3d strain = Bd* strain_dof;
 
-            auto dmat= get_dmat();
-
-            Eigen::VectorXd sdf(24);
-            set_local_stress_dof(sdf);
-
-            Eigen::Vector3d stress = dmat*m_val.bsmat(i,j)*sdf;
-            Eigen::Vector3d strain = strain_local(sval,tval);
+//            Eigen::Vector3d strain = strain_local(sval,tval);
             Eigen::Vector3d cnfn = m_material->get_constitutive_function(stress,strain);
-            double temp=cnfn.transpose()*cnfn;
-            m_objval+= temp * qw[i] * qw[j] * m_shape->get_detJ();
+            auto WxJ  = qw[i] * qw[j] * m_shape->get_detJ();
+//            double delval= cnfn.squaredNorm();
+            double delval=cnfn.norm();
+            objval+=delval*WxJ;
 
             //SETTING GRADIENT OF STRESS DOF
-            sdf_grad+= cnfn.transpose()*m_val.bsmat(i,j);
+
+            Eigen::MatrixXd CxBs = m_material->get_cmat()*Bs;
+//            sdf_grad+= -2*CxBs.transpose()*cnfn*WxJ;
+            Eigen::MatrixXd Bstrans = CxBs.transpose();
+            Eigen::VectorXd gradval= (-WxJ/delval)*Bstrans*cnfn;
+            sdf_grad=sdf_grad+ gradval ;
+//            sdf_grad+= -1*CxBs.transpose()*cnfn*WxJ/delval;
+
 
             //SETTING GRADIENT OF DISP.DOF
-            disp_grad+= -cnfn.transpose() * m_material->get_cmat() * m_shape->get_bmat();
+            Eigen::MatrixXd bmat=m_shape->get_bmat();
+            disp_grad+=(WxJ/delval)*bmat.transpose()*cnfn;
+//            disp_grad+= bmat.transpose()*cnfn*2.0*WxJ;;
         }
    }
 
-   //Distributing gradient dofs;
+
     auto node_ids=get_node_ids(); unsigned int i=0;
     for(auto&iter:node_ids)
     {
 
         unsigned int pos=(iter-1)*8;
-        gval[pos]=sdf_grad[i*6];
-        gval[pos+1]=sdf_grad[i*6+1];
-        gval[pos+2]=sdf_grad[i*6+2];
-        gval[pos+3]=sdf_grad[i*6+3];
-        gval[pos+4]=sdf_grad[i*6+4];
-        gval[pos+5]=sdf_grad[i*6+5];
+        gval[pos]+=sdf_grad[i*6];
+        gval[pos+1]+=sdf_grad[i*6+1];
+        gval[pos+2]+=sdf_grad[i*6+2];
+        gval[pos+3]+=sdf_grad[i*6+3];
+        gval[pos+4]+=sdf_grad[i*6+4];
+        gval[pos+5]+=sdf_grad[i*6+5];
 
-        gval[pos+6]=disp_grad[i*2];
-        gval[pos+7]=disp_grad[i*2+1];
+        gval[pos+6]+=disp_grad[i*2];
+        gval[pos+7]+=disp_grad[i*2+1];
 
         i++;
     }
 
-    m_shape.reset();
+    m_objval=objval;
 }
 
 Eigen::MatrixXd CPS4::get_dmat()
@@ -372,14 +385,7 @@ Eigen::Vector3d CPS4::strain_local(double sval, double tval)
 {
 
     auto bdmat=get_bmat(sval,tval);
-    Eigen::VectorXd uvec(8);
-    int i=0;
-    for(auto&iter:m_nodes)
-    {
-        const double* u= iter->get_displacement_dof();
-        uvec(2*i)=u[0];
-        uvec(2*i+1)=u[1];
-    }
+    Eigen::VectorXd uvec=get_strain_dof();
     return bdmat*uvec;
 }
 
@@ -418,26 +424,10 @@ Eigen::Matrix<double,3,8> CPS4::get_bmat(double,double)
 
 void CPS4:: set_boundary_constraints(const double* x, double* g)
 {
-
-    Eigen::VectorXd phi(24);
-    for(unsigned int i=0;i<4;i++)
-    {
-       auto sdf=m_nodes[i]->get_stress_dof();
-       for(unsigned int j=0;j<6;j++) phi[i*6+j]=sdf[j];
-    }
-    this->set_local_stress_dof(phi);  //Tranform into local coordintes.
-
+    Eigen::VectorXd phi = get_stress_dof();
     for(auto& face:m_boundary->m_boundary_faces)
     {
         assert(face.m_index!= -1); // check whether indices assigned
-        if(!face.is_constraint_set)
-        {
-            this->set_NLP_constraint_matrix(face);
-            //this->set_constraints_boundvals();
-        }
-
-
-
         auto i= face.m_index;
         g[i]   = face.node1->sdof(4)*face.nx - face.node1->sdof(5)*face.ny;
         g[i+1] = face.node1->sdof(3)*face.ny - face.node1->sdof(5)*face.nx;
@@ -471,41 +461,37 @@ void CPS4:: set_boundary_constraints(const double* x, double* g)
     }
 }
 
-void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
+void CPS4::set_NLP_constraint_matrix()
 {
-    static bool set_coordinate=false;
-    if(!set_coordinate)
+for(auto& face:m_boundary->m_boundary_faces)
+ {
+    if(!m_shape->m_set_coordinate)
     {
         auto xcoord=this->get_xcoords();
         auto ycoords=this->get_ycoords();
         m_shape->add_coordinates(xcoord,ycoords);
-        set_coordinate=true;
     }
 
-    CQuadrature quad(10);
-
+    auto qn=m_val.get_qnodes();
+    auto qw=m_val.get_qweight();
 
     //jacobian of constraints
     if(face.m_fixity==0)
     {
         auto n1=face.node1->get_id();
-        auto n2=face.node1->get_id();
+        auto n2=face.node2->get_id();
 
         auto& row=face.m_jac_g.m_row;
         auto& col= face.m_jac_g.m_col;
-        auto& val=face.m_jac_g.m_val;
-
-        row.resize(8);
-        col.resize(8);
-        val.resize(8);
-        row[0]=1; col[0]=(n1-1)*8+4;  val[0]=face.nx;
-        row[1]=1; col[1]=(n1-1)*8+5;  val[1]=-face.ny;
-        row[2]=2; col[2]=(n1-1)*8+3;  val[2]=face.ny;
-        row[3]=2; col[3]=(n1-1)*8+5;  val[3]=-face.nx;
-        row[4]=3; col[4]=(n2-1)*8+4;  val[4]=face.nx;
-        row[5]=3; col[5]=(n2-1)*8+5;  val[5]=-face.ny;
-        row[6]=4; col[6]=(n2-1)*8+3;  val[6]=face.ny;
-        row[7]=4; col[7]=(n2-1)*8+5;  val[7]=-face.nx;
+        auto& val=face.m_jac_g.m_val;       
+        row.push_back(0);   col.push_back((n1-1)*8+4); val.push_back(face.nx);
+        row.push_back(0);   col.push_back((n1-1)*8+5); val.push_back(-face.ny);
+        row.push_back(1);   col.push_back((n1-1)*8+3); val.push_back(face.ny);
+        row.push_back(1);   col.push_back((n1-1)*8+5); val.push_back(-face.nx);
+        row.push_back(2);   col.push_back((n2-1)*8+4); val.push_back(face.nx);
+        row.push_back(2);   col.push_back((n2-1)*8+5); val.push_back(-face.ny);
+        row.push_back(3);   col.push_back((n2-1)*8+3); val.push_back(face.ny);
+        row.push_back(3);   col.push_back((n2-1)*8+5); val.push_back(-face.nx);
 
     }
 
@@ -518,26 +504,24 @@ void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
         auto& col= face.m_jac_g.m_col;
         auto& val=face.m_jac_g.m_val;
 
-        row.resize(11);
-        col.resize(11);
-        val.resize(11);
-        row[0]=1; col[0]=(n1-1)*8+4;  val[0]=face.nx;
-        row[1]=1; col[1]=(n1-1)*8+5;  val[1]=-face.ny;
-        row[2]=1; col[2]=(n1-1)*8+6;  val[3]=-1;
-
-        row[3]=2; col[3]=(n1-1)*8+3;  val[3]=face.ny;
-        row[4]=2; col[4]=(n1-1)*8+5;  val[4]=-face.nx;
-        row[5]=2; col[5]=(n1-1)*8+7;  val[5]=-1;
+        row.push_back(0);   col.push_back((n1-1)*8+4); val.push_back(face.nx);
+        row.push_back(0);   col.push_back((n1-1)*8+5); val.push_back(-face.ny);
+        row.push_back(0);   col.push_back((n1-1)*8+6); val.push_back(-1);
 
 
-        row[6]=3; col[6]=(n2-1)*8+4;  val[6]=face.nx;
-        row[7]=3; col[7]=(n2-1)*8+5;  val[7]=-face.ny;
-        row[8]=1; col[8]=(n2-1)*8+6;  val[8]=-1;
+        row.push_back(1);   col.push_back((n1-1)*8+3); val.push_back(face.ny);
+        row.push_back(1);   col.push_back((n1-1)*8+5); val.push_back(-face.nx);
+        row.push_back(1);   col.push_back((n1-1)*8+7); val.push_back(-1);
 
 
-        row[9]=4; col[9]=(n2-1)*8+3;  val[9]=face.ny;
-        row[10]=4; col[10]=(n2-1)*8+5;  val[10]=-face.nx;
-        row[11]=2; col[11]=(n2-1)*8+7;  val[11]=-1;
+        row.push_back(2);   col.push_back((n1-1)*8+4); val.push_back(face.nx);
+        row.push_back(2);   col.push_back((n1-1)*8+5); val.push_back(-face.ny);
+        row.push_back(2);   col.push_back((n1-1)*8+6); val.push_back(-1);
+
+        row.push_back(3);   col.push_back((n1-1)*8+3); val.push_back(face.ny);
+        row.push_back(3);   col.push_back((n1-1)*8+5); val.push_back(-face.nx);
+        row.push_back(3);   col.push_back((n1-1)*8+7); val.push_back(-1);
+
 
     }
 
@@ -547,8 +531,7 @@ void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
 
 
 
-    auto qn=quad.get_nodes();
-    auto qw=quad.get_weight();
+
 
     Eigen::Matrix<double,1,24> Fx,Fy,M;
     Fx.setZero();Fy.setZero();M.setZero();
@@ -565,69 +548,52 @@ void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
 
             m_shape->update_shapefn(sval,tval);
 
-            auto dmat= this->get_dmat();
-            auto &bsmat= m_val.bsmat(i,j);
             Eigen::MatrixXd J = m_shape->get_jacobian();
 
             double dxds,dxdt,dyds,dydt;
-           dxds=J(0,0);dxdt=J(0,1);dyds=J(1,0);dydt=J(1,1);
-            Eigen::Matrix<double,6,6> tmat;
-            tmat<<  1,0,0,0,0,0,
-                    0,dxds,dyds,0,0,0,
-                    0,dxdt,dydt,0,0,0,
-                    0,0,0,dxds*dxds,dyds*dyds,2*dxds*dyds,
-                    0,0,0,dxdt*dxdt,dydt*dydt,2*dxdt*dydt,
-                    0,0,0,dxds*dxdt,dyds*dydt,dxds*dydt+dxdt*dyds;
-            Eigen::Matrix<double,6,6>zero;zero.setZero();
+            dxds=J(0,0);dxdt=J(0,1);dyds=J(1,0);dydt=J(1,1);
+            double Jds= sqrt(dxds*dxds+dyds*dyds);
+            double Jdt= sqrt(dxdt*dxdt+dydt*dydt);
 
-            Eigen::Matrix<double,24,24> Tmat;
-            Tmat<<tmat,zero,zero,zero,
-                    zero,tmat,zero,zero,
-                    zero,zero,tmat,zero,
-                    zero,zero,zero,tmat;
-            Eigen::Matrix<double,3,24> Bs;
-               Eigen::MatrixXd     Bsmat = dmat*bsmat*Tmat;
-
-
-             Eigen::Matrix<double,1,24> Sx,Sy,Sxy,Tx,Ty,Fx,Fy,M;
+            Eigen::MatrixXd Bs =get_bsmat_local(i,j);
+             Eigen::Matrix<double,1,24> Sx,Sy,Sxy,Tx,Ty;
              Sx.setZero();Sy.setZero();Sxy.setZero();Tx.setZero();Ty.setZero();
 
              Sx=Bs.row(1);
              Sy=Bs.row(0);
-             Sxy=-1*Bs.row(2);
+             Sxy=Bs.row(2);
 
              Tx=face.nx*Sx+face.ny*Sxy;
              Ty=face.ny*Sy+face.nx*Sxy;
 
-             double Jds= sqrt(dxds*dxds+dyds*dyds);
-             double Jdt= sqrt(dxdt*dxdt+dydt*dydt);
+
 
              if(face.id==0 )
              {
-                 Fx += qw[i]*qw[j]*Tx*Jds;
-                 Fy += qw[i]*qw[j]*Ty*Jds;
-                 M  +=  qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jds;
+                 Fx.noalias() += qw[i]*qw[j]*Tx*Jds;
+                 Fy.noalias() += qw[i]*qw[j]*Ty*Jds;
+                 M.noalias()  +=  qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jds;
              }
 
              if(face.id==1)
              {
-                 Fx += qw[i]*qw[j]*Tx*Jdt;
-                 Fy += qw[i]*qw[j]*Ty*Jdt;
-                 M  +=  qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jdt;
+                 Fx.noalias() += qw[i]*qw[j]*Tx*Jdt;
+                 Fy.noalias() += qw[i]*qw[j]*Ty*Jdt;
+                 M.noalias()  +=  qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jdt;
              }
 
             if(face.id==2)
              {
-                 Fx += -1*qw[i]*qw[j]*Tx*Jds;
-                 Fy += -1*qw[i]*qw[j]*Ty*Jds;
-                 M  +=  -1*qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jds;
+                 Fx.noalias() += 1*qw[i]*qw[j]*Tx*Jds;
+                 Fy.noalias() += 1*qw[i]*qw[j]*Ty*Jds;
+                 M.noalias()  +=  1*qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jds;
              }
 
              if(face.id==3)
              {
-                 Fx += -1*qw[i]*qw[j]*Tx*Jdt;
-                 Fy += -1*qw[i]*qw[j]*Ty*Jdt;
-                 M  +=  -1*qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jdt;
+                 Fx.noalias() += -1*qw[i]*qw[j]*Tx*Jdt;
+                 Fy.noalias() += -1*qw[i]*qw[j]*Ty*Jdt;
+                 M.noalias()  += -1*qw[i]*qw[j]*(m_shape->X()*Ty-m_shape->Y()*Tx)*Jdt;
              }
 
 
@@ -642,6 +608,7 @@ void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
 
     if(face.m_fixity==0)
     {
+         unsigned int valN= -1; // increases from 0to23 inthe loop.
         std::vector<unsigned int> n=this->get_node_ids();
         for(auto id:n)
         {
@@ -651,13 +618,10 @@ void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
 
             for(unsigned int colIndex= (id-1)*8; colIndex<(id-1)*8+6;colIndex++)
             {
-                static unsigned int idx=7;   //row indices.
-                static unsigned int valN= -1; //increases from 0 to 23.
-                valN++;
-                row[idx++]= 4; col[idx] = colIndex; val[idx]= Fx[valN];
-                row[idx++]=5;  col[idx] = colIndex; val[idx]=Fy[valN];
-                row[idx++]=6;  col[idx] = colIndex; val[idx]=M[valN];
-
+               valN++;
+                row.push_back(4); col.push_back(colIndex); val.push_back(Fx[valN]);
+                row.push_back(5); col.push_back(colIndex); val.push_back(Fy[valN]);
+                row.push_back(6); col.push_back(colIndex); val.push_back(M[valN]);
             }
 
         }
@@ -670,41 +634,48 @@ void CPS4::set_NLP_constraint_matrix(BoundaryFace& face)
         auto& row=face.m_jac_g.m_row;
         auto& col= face.m_jac_g.m_col;
         auto& val=face.m_jac_g.m_val;
-        static unsigned int idx=11;   //row indices.
         auto Tx_index=(face.node1->get_id()-1)*8+6;
         auto Ty_index=(face.node1->get_id()-1)*8+7;
         for(auto id:n)
         {
+            unsigned int valN=-1;
             for(unsigned int colIndex= (id-1)*8; colIndex<(id-1)*8+6;colIndex++)
             {
-                static unsigned int valN= -1; //increases from 0 to 23.
                 valN++;
-                row[idx++]= 4; col[idx] = colIndex; val[idx]= Fx[valN];
-                row[idx++]=5;  col[idx] = colIndex; val[idx]=Fy[valN];
-                row[idx++]=6;  col[idx] = colIndex; val[idx]=M[valN];
-
+                row.push_back(4);  col.push_back(colIndex); val.push_back(Fx[valN]);
+                row.push_back(5);  col.push_back(colIndex); val.push_back(Fy[valN]);
+                row.push_back(6);  col.push_back(colIndex); val.push_back(M[valN]);
             }
         }
-        row[idx++]=4; col[idx]=Tx_index; val[idx] = -face.length();
-        row[idx++]=5; col[idx]=Ty_index; val[idx] = -face.length();
+
+        row.push_back(4); col.push_back(Tx_index); val.push_back(-face.length());
+        row.push_back(5); col.push_back(Ty_index); val.push_back(-face.length());
+
         double x1= face.node1->x();
         double x2= face.node2->x();
         double y1= face.node1->y();
         double y2= face.node2->y();
         //g[i+6]=g[i+6]-(x2*x2-x1*x1)*df1[1]/2 - (y2*y2-y1*y1)*df1[0]/2;
-        row[idx++]=6; col[idx]=Ty_index;  val[idx]= (x2*x2-x1*x1)/2;
-        row[idx++]=6; col[idx]=Tx_index;  val[idx]= -(y2*y2-y1*y1)/2;
+        row.push_back(6); col.push_back(Ty_index); val.push_back((x2*x2-x1*x1)/2);
+        row.push_back(6); col.push_back(Tx_index); val.push_back(-(y2*y2-y1*y1)/2);
+
     }
 
+    face.is_constraint_set=true;
+ }
 }
+
+
 
 
 //Set by CPS4 Element
 void CPS4::set_constraints_boundvals()
 {
     std::vector<double> m_bval;
+    m_bval.resize(7);
     for(auto& face:m_boundary->m_boundary_faces)
     {
+        if(face.pressure==0) {face.m_boundvals=m_bval;continue;}
         if(face.m_fixity==0)
         {
             //direction cosines of normals.
@@ -730,15 +701,27 @@ void CPS4::set_constraints_boundvals()
             m_bval.resize(7); // set to zero
         }
 
-
+    face.m_boundvals=m_bval;
 
     }
 }
 
-
-/*std::vector<unsigned int>CPS4::get_node_ids()
+Eigen::VectorXd CPS4::get_stress_dof()
 {
-    std::vector<unsigned int> Ids;
+    Eigen::VectorXd phi(24);
+    for(unsigned int i=0;i<4;i++)
+    {
+       auto sdf=m_nodes[i]->get_stress_dof();
+       for(unsigned int j=0;j<6;j++)
+           phi[i*6+j]=sdf[j];
+    }
+    return phi;
+}
+
+/*
+std::vector<unsigned int>CPS4::get_node_ids()
+{
+  /*  std::vector<unsigned int> Ids;
     Ids.clear();
     Ids.reserve(4);
     auto x=m_nodes[0]->get_id();
@@ -757,3 +740,44 @@ void CPS4::set_constraints_boundvals()
     nodeIds[3]=m_nodes[3]->get_id();
     return nodeIds;
 }*/
+
+Eigen::MatrixXd CPS4::get_bsmat_local(unsigned int i,unsigned int j)
+{
+    Eigen::MatrixXd J = m_shape->get_jacobian();
+    Eigen::MatrixXd D= get_dmat();
+    double dxds,dxdt,dyds,dydt;
+   dxds=J(0,0);dxdt=J(0,1);dyds=J(1,0);dydt=J(1,1);
+    Eigen::Matrix<double,6,6> tmat;
+    tmat<<  1,0,0,0,0,0,
+            0,dxds,dyds,0,0,0,
+            0,dxdt,dydt,0,0,0,
+            0,0,0,dxds*dxds,dyds*dyds,2*dxds*dyds,
+            0,0,0,dxdt*dxdt,dydt*dydt,2*dxdt*dydt,
+            0,0,0,dxds*dxdt,dyds*dydt,dxds*dydt+dxdt*dyds;
+    Eigen::Matrix<double,6,6>zero;zero.setZero();
+
+    Eigen::Matrix<double,24,24> Tmat;
+    Tmat<<tmat,zero,zero,zero,
+            zero,tmat,zero,zero,
+            zero,zero,tmat,zero,
+
+            zero,zero,zero,tmat;
+    Eigen::MatrixXd Bs = D*m_val.bsmat(i,j)*Tmat;
+    return Bs;
+
+}
+
+Eigen::VectorXd CPS4::get_strain_dof()
+{
+    Eigen::VectorXd uvec(8);
+    int i=0;
+    for(auto&iter:m_nodes)
+    {
+        auto u= iter->get_displacement_dof();
+        uvec(2*i)=u[0];
+        uvec(2*i+1)=u[1];
+        i++;
+    }
+
+    return uvec;
+}

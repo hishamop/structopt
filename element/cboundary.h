@@ -25,7 +25,7 @@ public:
     double nx,ny;
     unsigned int id;
     node_ptr node1,node2;
-    double pressure;
+    double pressure=0;
     int m_fixity=0;    
     int   m_index;  //index for constraint beginning.
     Eigen::MatrixXd m_constraint; //bsmat at nodes 1 and two assgined by Element class

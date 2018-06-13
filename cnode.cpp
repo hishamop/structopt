@@ -32,3 +32,21 @@ void CNode::update_dof(const double *x)
         m_traction=  &x[(m_id-1)*8+6];
     }
 }
+
+std::vector<double> CNode::get_dof()
+{
+    std::vector<double> dof;
+    for(int i=0;i<6;i++)
+        dof.push_back(this->m_sdof[i]);
+    dof.push_back(m_ddof[0]);
+    dof.push_back(m_ddof[1]);
+    return dof;
+
+
+}
+
+void CNode::update_dof(std::vector<double> &x)
+{
+    m_sdof = &x[(m_id-1)*8];
+    m_ddof = &x[(m_id-1)*8+6];
+}

@@ -5,13 +5,13 @@
 class Shapefn
 {
 public:
-    Shapefn(){}
+    Shapefn(){m_set_coordinate=false;}
 
-    Shapefn(std::vector<double> xcoord, std::vector<double> ycoord){m_xcoord=xcoord;m_ycoord=ycoord;}
+    Shapefn(std::vector<double> xcoord, std::vector<double> ycoord){m_xcoord=xcoord;m_ycoord=ycoord;m_set_coordinate=true;}
     ~Shapefn(){}
-    void add_coordinates(std::vector<double> xcoord, std::vector<double> ycoord){m_xcoord=xcoord;m_ycoord=ycoord;}
+    void add_coordinates(std::vector<double> xcoord, std::vector<double> ycoord){m_xcoord=xcoord;m_ycoord=ycoord;m_set_coordinate=true;}
     virtual void update_shapefn(double sval, double tval)=0;
-    Eigen::MatrixXd get_bmat(){return m_bmat;}    //strain displacement matrix
+    virtual Eigen::MatrixXd get_bmat()=0;  //strain displacement matrix
     Eigen::MatrixXd get_jacobian(){return m_jacobian;}
     Eigen::MatrixXd& get_inverse_jacobian(){return m_inverse_jacobian;}
     Eigen::RowVectorXd get_shapefn_val(){return m_shapefn_val;}
@@ -23,6 +23,7 @@ public:
     double Y(){}
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    bool m_set_coordinate;
 
 protected:
     Eigen::MatrixXd m_bmat;
@@ -45,6 +46,7 @@ class Quad4:public Shapefn
     ~Quad4(){}
     Quad4(std::vector<double> xcoord, std::vector<double> ycoord){m_xcoord=xcoord;m_ycoord=ycoord;}
     void update_shapefn( double sval,double tval);
+    Eigen::MatrixXd get_bmat();
     void set_coordinates(std::vector<double>,std::vector<double>);
     Eigen::MatrixXd get_bsmat();
 

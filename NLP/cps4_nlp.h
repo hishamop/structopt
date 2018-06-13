@@ -34,12 +34,13 @@ public:
                                  Index m, const Number* g, const Number* lambda,
                                  Number obj_value,
                  const IpoptData* ip_data,
-                                  IpoptCalculatedQuantities* ip_cq){}
+                                  IpoptCalculatedQuantities* ip_cq);
 
     void set_nlp_info();
     void set_constraints();
-    int  get_Nconstr();
-    int  get_Nnz_jacobian();
+    int get_Nvar(){return m_Nvar;}
+    int  get_Nconstr(){return m_Nconstr;}
+    int  get_Nnz_jacobian(){return m_Nnz_jacobian;}
     int  get_Nnz_hess_lagrangian();
 
     //dof , gradient and hessian
@@ -75,7 +76,7 @@ private:     //PRIVATE DATA
   std::vector<double> m_xi_upper_bound;
   //std::vector<double> m_g;       //Constraint equations
   std::vector<double> m_gval;  //constraint values
-
+  std::vector<double> m_x;
   std::vector<double> m_g_val;   //Constraint value
   std::vector<double> m_gradvals; //gradient of function variables
 

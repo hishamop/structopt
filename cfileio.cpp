@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <assert.h>
+//#include "boundary/cboundary.h"
 #include"element/cboundary.h"
 
 
@@ -401,7 +402,7 @@ void CFileio::read_pload()
             {
                std::string::iterator
                         beg =ss.begin() +first_comma_index+1,
-                        end =ss.begin() +second_comma_index+first_comma_index-1;
+                        end =ss.begin() +first_comma_index+3;;
                 szface =std::string(beg,end);
             }   //get element set and load orientation
 
@@ -419,6 +420,12 @@ void CFileio::read_pload()
         for(auto& iter:m_model->m_elset_map[elset_name])
         {
             iter->get_boundary()->m_pload[nface]=pressure;
+            auto& faces= iter->m_boundary->m_boundary_faces;
+            for(auto face=faces.begin(); face!=faces.end();face++)
+            {
+                if(face->id==nface)
+                face->pressure=pressure;
+            }
 
         }
 

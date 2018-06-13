@@ -54,8 +54,10 @@ public:
     std::vector<double> get_standard_stress_dof(const double* var_list);
     std::vector<double> get_standard_stress_dof(const std::vector<double>& var_list);
     Eigen::VectorXd     get_standard_stress_dof(Eigen::VectorXd& var);
+    Eigen::VectorXd     get_stress_dof();
+    Eigen::VectorXd     get_strain_dof();
     void calculate_fvals(std::vector<double>&);
-    void set_NLP_constraint_matrix(BoundaryFace&);
+    void set_NLP_constraint_matrix();
     void set_constraints_boundvals();
  //   std::vector<unsigned int> get_node_ids();
 
@@ -63,7 +65,7 @@ public:
     Eigen::Matrix2d jacobian_matrix(double sval, double tval);
     Eigen::Matrix2d inverse_jacobian(double sval,double tval);
     Eigen::Matrix<double,3,8> get_bmat(double sval,double tval);
-    Eigen::MatrixXd get_bsmat_local(double x,double y);
+    Eigen::MatrixXd get_bsmat_local(unsigned int,unsigned int);
     double detJ(double,double);
 
     int get_dof_count() const{return 32;}

@@ -28,17 +28,27 @@ void CPS4_NLP::set_nlp_info()
     for(auto&&iter:m_model->m_boundary_elems)
     {
 
+        iter->set_constraints_boundvals();
+        iter->set_NLP_constraint_matrix();
+
+
             for(auto&& it:iter->m_boundary->m_boundary_faces)
             {
 
                 m_Nnz_jacobian+=it.m_jac_g.m_val.size();
-                iter->set_NLP_constraint_matrix(it);
                 m_gval.insert(m_gval.end(),it.m_boundvals.begin(),it.m_boundvals.end());
             }
 
 
     }
 
+    //Distributing DoFs.
+
+    m_x.resize(m_Nvar);
+    for(auto& iter:m_model->m_nodes)
+    {
+        iter->update_dof(m_x);
+    }
 
 
 
@@ -62,12 +72,14 @@ bool CPS4_NLP:: get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
 bool CPS4_NLP::get_bounds_info(Index n, Number* x_l, Number* x_u,
                                 Index m, Number* g_l, Number* g_u)
 {
-    std::copy(m_xi_lower_bound.begin(),m_xi_lower_bound.end(),x_l);
-    std::copy(m_xi_upper_bound.begin(),m_xi_upper_bound.end(),x_u);
+    for(int i=0;i<n;i++)
+    {
+        x_l[i]=-1e19;
+        x_u[i]=1e19;
+    }
 
-
-    std::copy(m_g_val.begin(),m_g_val.end(),g_l);
-    std::copy(m_g_val.begin(),m_g_val.end(),g_u);
+    std::copy(m_gval.begin(),m_gval.end(),g_l);
+    std::copy(m_gval.begin(),m_gval.end(),g_u);
 
     return true;
 }
@@ -99,11 +111,9 @@ CPS4_NLP::set_constraints()
 
      for(unsigned int i=0;i<n;i++)
      {
-         x[i]=0;
+         x[i]=1;
      }
      return true;
-//         std::copy(m_xi.begin(),m_xi.end(),x);
-         return true;
  }
 
 
@@ -113,6 +123,7 @@ CPS4_NLP::set_constraints()
      {
          update_funvals(x);
      }
+//     this->update_funvals(x);
 
      obj_value = this->m_objval;
      return true;
@@ -122,12 +133,12 @@ CPS4_NLP::set_constraints()
 
  bool CPS4_NLP::eval_grad_f(Index n, const Number *x, bool new_x, Number *grad_f)
  {
-     // All gradients are initiliased to zeros
+//      All gradients are initiliased to zeros
     if(new_x)
     {
         update_funvals(x);
     }
-
+//    update_funvals(x);
     std::copy(m_gradvals.begin(),m_gradvals.end(),grad_f);
     return true;
  }
@@ -135,6 +146,10 @@ CPS4_NLP::set_constraints()
  bool CPS4_NLP::eval_g(Index n, const Number *x, bool new_x, Index m, Number *g)
  {
 
+     if(new_x)
+     {
+         update_funvals(x);
+     }
      for(auto iter:m_model->m_boundary_elems)
      {
          iter->set_boundary_constraints(x,g);
@@ -144,21 +159,27 @@ CPS4_NLP::set_constraints()
 
  bool CPS4_NLP::eval_jac_g(Index n, const Number *x, bool new_x, Index m, Index nele_jac, Index *iRow, Index *jCol, Number *values)
  {
+     if(new_x)
+     {
+         update_funvals(x);
+     }
 
      if (values == NULL) {
        // return the structure of the jacobian
+         int j=-1; // iterates from 0 to nNz_jac;
          for(auto iter:m_model->m_boundary_elems)
          {
-             int i=0;
              for(auto face:iter->m_boundary->m_boundary_faces)
              {
                  auto& row = face.m_jac_g.m_row;
                  auto& col = face.m_jac_g.m_col;
-                 for(auto& rowIter:row)
-                     iRow[i++] = rowIter;
-                 for(auto& colIter:col)
-                     jCol[i++] = colIter;
-
+                 for(int i=0;i<row.size();i++)
+                 {
+                     j++;
+                     assert(face.m_index!=-1);
+                     iRow[j]=row[i]+face.m_index;//row[i] ranges from 0 to 8. Global rowNo;
+                     jCol[j]=col[i];
+                 }
              }
          }
 
@@ -166,14 +187,14 @@ CPS4_NLP::set_constraints()
      else {
        // return the values of the jacobian of the constraints
 
+         int i=-1;
          for(auto& iter:m_model->m_boundary_elems)
          {
-             int i=0;
              for(auto face:iter->m_boundary->m_boundary_faces)
              {
                  auto& val = face.m_jac_g.m_val;
                  for(auto& valIter:val)
-                     values[i++] = valIter;
+                     values[++i] = valIter;
              }
 
 
@@ -191,10 +212,11 @@ CPS4_NLP::set_constraints()
      //finding objective function value and gradients
      std::fill(m_gradvals.begin(),m_gradvals.end(),0.0);
      m_objval=0;
-     for(auto&iter:m_model->m_nodes)
+     /*for(auto&iter:m_model->m_nodes)
      {
          iter->update_dof(x);
-     }
+     }*/
+     m_x.assign(x,x+m_Nvar);
      for(auto& iter:m_model->m_elements)
      {
          
@@ -203,3 +225,13 @@ CPS4_NLP::set_constraints()
      }
  }
 
+  void CPS4_NLP::finalize_solution(SolverReturn status,
+                               Index n, const Number* x, const Number* z_L, const Number* z_U,
+                               Index m, const Number* g, const Number* lambda,
+                               Number obj_value,
+               const IpoptData* ip_data,
+                                IpoptCalculatedQuantities* ip_cq)
+  {
+      m_x.assign(x,x+n);
+      m_objval = obj_value;
+  }

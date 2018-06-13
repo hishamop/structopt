@@ -22,8 +22,9 @@ class STEEL:public CMaterial
 public:
     STEEL();
     ~STEEL();
-    Eigen::Vector3d get_constitutive_function(Eigen::Vector3d stress,Eigen::Vector3d strain){ return stress-m_stiffness_mat*strain;}
+    Eigen::Vector3d get_constitutive_function(Eigen::Vector3d stress,Eigen::Vector3d strain);
     const Eigen::Matrix3d& get_cmat(){return m_stiffness_mat;}
+
 
 private:
     Eigen::Matrix3d m_stiffness_mat;

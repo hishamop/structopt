@@ -1,4 +1,6 @@
 #include <iostream>
+//#include "cmodel.h"
+//#include "cfileio.h"
 #include<ctime>
 #include"cnode.h"
 #include"element/celement.h"
@@ -7,13 +9,15 @@
 #include "cfileio.h"
 #include "eigen3/Eigen/Core"
 #include "NLP/cps4_nlp.h"
+#include"cquadratrue.h"
+#include <cstdlib>
+#include<cmath>
 using namespace std;
 
 //from Ipopt library
 #include"coin/IpIpoptApplication.hpp"
 #include"coin/IpSolveStatistics.hpp"
-
-
+#include"coin/IpTNLP.hpp"
 
 int main()
 {
@@ -27,7 +31,7 @@ int main()
 
     //reading the input file.
     {
-        CFileio read("input/sample.in",&model);
+        CFileio read("input/input.in",&model);
     }
 
     //create an instance of N.L.P
@@ -40,6 +44,10 @@ int main()
 
     //set options.
     app->Options()->SetNumericValue("tol", 1e-9);
+    app->Options()->SetStringValue("hessian_approximation","limited-memory");
+//    app->Options()->SetStringValue("derivative_test","first-order");
+//    app->Options()->SetStringValue("linear_solver","mumps");
+//    app->Options()->SetStringValue("dependency_detector","mumps");
 
     // Intialize the IpoptApplication and process the options
     ApplicationReturnStatus status;

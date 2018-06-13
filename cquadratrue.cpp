@@ -70,14 +70,8 @@ void CQuadrature::set_gauss_val(const double* x,const double* w)
     {
         m_nodes[2*i]=-1.0*x[i];
         m_nodes[2*i+1]=x[i];
-        m_weight[2*i+1]=-1.0*w[i];
+        m_weight[2*i]= w[i];
         m_weight[2*i+1]=w[i];
-
-       /* auto val=-1.0*x[i];
-        m_nodes.push_back(val);
-        m_nodes.push_back(x[i]);
-        m_weight.push_back(-1.0*w[i]);
-        m_weight.push_back(w[i]);*/
     }
 }
 

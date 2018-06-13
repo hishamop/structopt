@@ -15,6 +15,7 @@ public:
     void update_disp_dof(const double*);
     void update_traction(const double*);
     void update_dof(const double*);
+    void update_dof( std::vector<double>&);
     void update_grad_dof();
     std::vector<double>& get_gradients(){return m_grad_dof;}
     double x(){return m_x;}
@@ -32,6 +33,8 @@ public:
     double sdof(unsigned int i){return m_sdof[i];}
     double ddof(unsigned int i){return m_ddof[i];}
 
+    std::vector<double> get_dof();
+
     //stress at node
     double stress_xx();
     double stress_yy();
@@ -46,7 +49,7 @@ private:
     double m_x;
     double m_y;
     std::vector<unsigned int> m_incident_elements;
-    unsigned int m_fixity;
+    unsigned int m_fixity=0;
     unsigned int   m_Ndof;
     std::vector<double> m_grad_dof;
     const double* m_traction;
